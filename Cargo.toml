@@ -1,0 +1,11 @@
+[package]
+name = "zgit"
+version = "0.1.0"
+edition = "2024"
+
+
+[dependencies]
+clap = { version = "4.5.48", features = ["color"] }
+sha1 = "0.10.6"
+hex = "0.4.3"
+flate2 = "1.1.5"
