@@ -73,7 +73,6 @@ pub fn init_zgit_repo() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-///
 pub fn write_content_atomically(path: &Path, content: &[u8]) -> Result<(), Box<dyn Error>> {
     get_absolute_path(path);
     let parent = path.parent();
@@ -193,22 +192,17 @@ pub fn store_object(
             return Ok(oid);
         }
 
+        //
         let dir = path_to_make.parent();
-        match dir {
-            Some(path) => create_dir_all(path)?,
+        let dir = match dir {
+            Some(path) => path,
             None => return Err("Unexpected error occure".into()),
         };
+        let stream = format_object_content(tp, source)?;
+        let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
+        e.write_all(&stream)?;
+        let compressed_bytes = e.finish()?;
+        write_content_atomically(dir.join(file).as_path(), &compressed_bytes)?;
     }
-
-    let stream = format_object_content(tp, source)?;
-
-    let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
-    e.write_all(&stream)?;
-    let compressed_bytes = e.finish()?;
-
-    // let path = write_content_atomically(repo.join("./.zgit/objects"));
-    // join(dir).join(file),
-    // &compressed_bytes,
-
     Ok(oid)
 }
