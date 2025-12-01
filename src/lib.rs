@@ -1,22 +1,16 @@
-use flate2::{Compression, write::ZlibEncoder};
+use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use sha1::{Digest, Sha1};
 use std::{
     error::Error,
-    fs::{self, File, create_dir_all, rename},
+    fs::{self, File, create_dir_all},
     io::{self, ErrorKind, Read, Write},
     path::{Path, PathBuf},
     u8,
 };
 
-fn get_absolute_path<P: AsRef<Path>>(path: P) -> io::Result<PathBuf> {
-    let input_path = path.as_ref();
+use crate::utlis::{ObjType, find_file_by_name, get_absolute_path, write_content_atomically};
 
-    // canonicalize converts relative path → absolute path
-    // and also resolves symbolic links, `.` and `..`
-    let abs_path = input_path.canonicalize()?;
-
-    Ok(abs_path)
-}
+pub mod utlis;
 ///Give error when required argument is Option<true> and provide path is not a git repository.
 ///otherwise it return Option<pathbuf>
 pub fn find_repo(
@@ -73,48 +67,13 @@ pub fn init_zgit_repo() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn write_content_atomically(path: &Path, content: &[u8]) -> Result<(), Box<dyn Error>> {
-    get_absolute_path(path);
-    let parent = path.parent();
-    let parent_path = match parent {
-        Some(parent_path) => parent_path,
-        None => {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Path has no parent directory",
-            )) as Box<dyn std::error::Error>);
-        }
-    };
-
-    let is_parent_dir_exist = parent_path.try_exists()?;
-
-    if !is_parent_dir_exist {
-        return Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Parent directory doesn't exist",
-        )) as Box<dyn std::error::Error>);
-    }
-
-    let tmp = parent_path.join("tmp");
-
-    let mut file = File::create(&tmp)?;
-    file.write_all(content)?;
-    file.sync_all()?;
-
-    rename(tmp, path)?;
-
-    let dir = File::open(parent_path)?;
-    dir.sync_all()?;
-
-    Ok(())
-}
-
 type Oid = [u8; 20];
 
 ///Return blob of hash. Hash generated using header byte + data buffer
 /// ```
 /// use std::io::Cursor;
-///let mut data = Cursor::new("hello")
+/// use zgit::compute_oid;
+///let mut data = Cursor::new("hello");
 /// let oid = compute_oid("blob", &mut data).unwrap();
 /// assert_eq!(hex::encode(oid), "b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0")
 ///
@@ -151,7 +110,7 @@ pub fn format_object_content(tp: &str, mut data: impl Read) -> Result<Vec<u8>, B
         "tree" => header.push_str(tp),
         "commit" => header.push_str(tp),
         "tag" => header.push_str(tp),
-        _ => return Err("".into()),
+        _ => return Err("Received invalid object type".into()),
     };
     let mut buffer = Vec::new();
     let size = data.read_to_end(&mut buffer)?;
@@ -161,48 +120,73 @@ pub fn format_object_content(tp: &str, mut data: impl Read) -> Result<Vec<u8>, B
     Ok(concatened)
 }
 
-pub enum ObjType {
-    Blob,
-    Commit,
-    Tag,
-}
-
 pub fn store_object(
     repo: &Path,
     obj_type: ObjType,
     source: &mut impl Read,
 ) -> Result<Oid, Box<dyn Error>> {
-    let tp = match obj_type {
-        ObjType::Blob => "blob",
-        ObjType::Commit => "commit",
-        ObjType::Tag => "tag",
-    };
-
-    let oid = compute_oid(&tp, source)?;
-
-    let hash = hex::encode(oid);
-    let dir = &hash[0..3];
-    let file = &hash[3..];
-    //If path to file that we wanna make already exists then early return oid
-    // Otherwise create directory
     if let Some(path) = find_repo(Some(repo.to_path_buf()), Some(true))? {
-        let path_to_make = path.join("./.zgit/objects").join(dir).join(file);
+        let tp = match obj_type {
+            ObjType::Blob => "blob",
+            ObjType::Commit => "commit",
+            ObjType::Tag => "tag",
+        };
 
+        let oid = compute_oid(&tp, source)?;
+
+        let hash = hex::encode(oid);
+        let dir = &hash[0..2];
+        let file = &hash[2..];
+        //If path to file that we wanna make already exists then early return oid
+        // Otherwise create directory
+        let path_to_make = path.join(".zgit/objects").join(dir).join(file);
         if path_to_make.try_exists()? {
             return Ok(oid);
         }
 
-        //
         let dir = path_to_make.parent();
         let dir = match dir {
             Some(path) => path,
             None => return Err("Unexpected error occure".into()),
         };
+        create_dir_all(dir)?;
+        File::create(&path_to_make)?;
         let stream = format_object_content(tp, source)?;
         let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
         e.write_all(&stream)?;
         let compressed_bytes = e.finish()?;
-        write_content_atomically(dir.join(file).as_path(), &compressed_bytes)?;
+        write_content_atomically(&path_to_make, &compressed_bytes)?;
+        return Ok(oid);
     }
-    Ok(oid)
+    return Err("Not a git repository (or any parent up to mount point /".into());
+}
+
+pub fn read_object(repo: &Path, oid_or_prefix: &str) -> Result<(ObjType, Vec<u8>), Box<dyn Error>> {
+    if let Some(root_dir_of_repo) = find_repo(Some(repo.to_path_buf()), Some(true))? {
+        if oid_or_prefix.len() < 2 {
+            return Err("Provided prefix is too short.".into());
+        }
+
+        let dir = &oid_or_prefix[0..2];
+        let file_name = &oid_or_prefix[2..];
+        let dir = root_dir_of_repo.join(".zgit/objects").join(dir);
+        println!("{:?}", dir);
+        if !dir.try_exists()? {
+            return Err("Object not found with given prefix {oid_or_prefix}".into());
+        }
+        let matched_file = find_file_by_name(dir, file_name)?;
+
+        match matched_file {
+            None => return Err("File not found with give oid prefix".into()),
+            Some(file_path) => {
+                let compressed_data = File::open(file_path)?;
+                let mut d = ZlibDecoder::new(compressed_data);
+                println!("{:?}", d);
+                let mut s = String::new();
+                d.read_to_string(&mut s)?;
+                return Ok((ObjType::Blob, s.as_bytes().into()));
+            }
+        }
+    }
+    return Err("Object not found with given prefix {oid_or_prefix}".into());
 }
