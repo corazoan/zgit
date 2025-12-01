@@ -1,19 +1,12 @@
 // use std::path::Path;
 
 use std::{
-    io::Write,
+    io::Cursor,
     path::{Path, PathBuf},
 };
+use zgit::utlis::ObjType;
+use zgit::{compute_oid, find_repo, format_object_content, read_object, store_object};
 
-use zgit::{compute_oid, find_repo, format_object_content};
-
-// #[test]
-// fn test_find_repo() -> Result<(), Box<dyn std::error::Error>> {
-//     debug_assert_eq!(
-//         zgit::find_repo(Some(Path::new("/home/lightboy").to_path_buf()), Some(false)),
-//         Ok(None)
-//     )
-// }
 #[test]
 fn test_compute_oid() {
     use std::io::Cursor;
@@ -43,4 +36,34 @@ fn test_find_repo() {
 fn find_repo_abs_invalid_zgit_repo_path() {
     let path = find_repo(Some(Path::new("/home/lightboy").to_path_buf()), Some(false)).unwrap();
     assert_eq!(path, None)
+}
+
+#[test]
+fn test_store_object() {
+    let mut source = Cursor::new("Implementing version control system");
+    let repo = Path::new("../test");
+    let oid = store_object(repo, ObjType::Commit, &mut source).unwrap();
+
+    let hash = hex::encode(oid);
+    let dir_name = &hash[0..2];
+    let file_name = &hash[2..];
+
+    assert_eq!(dir_name, "68");
+    assert_eq!(file_name, "63dbb7f3f6c7936432142d546034738fcdfdd7");
+
+    let path_to_file = repo.join(".zgit/objects").join(dir_name).join(file_name);
+    assert_eq!(path_to_file.try_exists().unwrap(), true);
+}
+#[test]
+fn some_read_object() {
+    match read_object(
+        Path::new("../test").as_ref(),
+        "6863dbb7f3f6c7936432142d546034738fcdf",
+    ) {
+        Err(err) => {
+            println!("{err}");
+            panic!()
+        }
+        Ok((obj_type, data)) => println!("{:?} {:?}", obj_type, data),
+    };
 }
