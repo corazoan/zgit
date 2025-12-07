@@ -4,20 +4,21 @@ use std::{
     io::Cursor,
     path::{Path, PathBuf},
 };
-use zgit::utlis::ObjType;
-use zgit::{compute_oid, find_repo, format_object_content, read_object, store_object};
+use zgit::{compute_oid, find_repo, format_object_content, store_object};
+use zgit::{read_object, utlis::ObjType};
 
 #[test]
 fn test_compute_oid() {
     use std::io::Cursor;
     let mut data = Cursor::new("hello");
-    let oid = compute_oid("blob", &mut data).unwrap();
+    let oid = compute_oid(&ObjType::Blob, &mut data).unwrap();
     assert_eq!(hex::encode(oid), "b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0")
 }
 
 #[test]
 fn test_format_object_content() {
-    let some = format_object_content("blob", b"hello".as_ref()).unwrap();
+    let data = Cursor::new("hello");
+    let some = format_object_content(&ObjType::Blob, data).unwrap();
     assert_eq!(some, b"blob 5\0hello")
 }
 
@@ -42,7 +43,7 @@ fn find_repo_abs_invalid_zgit_repo_path() {
 fn test_store_object() {
     let mut source = Cursor::new("Implementing version control system");
     let repo = Path::new("../test");
-    let oid = store_object(repo, ObjType::Commit, &mut source).unwrap();
+    let oid = store_object(repo, &ObjType::Commit, &mut source).unwrap();
 
     let hash = hex::encode(oid);
     let dir_name = &hash[0..2];
@@ -53,17 +54,13 @@ fn test_store_object() {
 
     let path_to_file = repo.join(".zgit/objects").join(dir_name).join(file_name);
     assert_eq!(path_to_file.try_exists().unwrap(), true);
+    let (obj_type, file_content) = read_object(repo, &hash).unwrap();
+
+    assert_eq!(obj_type, ObjType::Commit);
+    assert_eq!(
+        String::from_utf8(file_content).unwrap(),
+        "commit 35\0Implementing version control system"
+    );
 }
 #[test]
-fn some_read_object() {
-    match read_object(
-        Path::new("../test").as_ref(),
-        "6863dbb7f3f6c7936432142d546034738fcdf",
-    ) {
-        Err(err) => {
-            println!("{err}");
-            panic!()
-        }
-        Ok((obj_type, data)) => println!("{:?} {:?}", obj_type, data),
-    };
-}
+fn some_read_object() {}
