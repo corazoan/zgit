@@ -1,5 +1,6 @@
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use sha1::{Digest, Sha1};
+use std::io::{BufRead, BufReader};
 use std::{
     error::Error,
     fs::{self, File, create_dir_all},
@@ -68,13 +69,14 @@ pub fn init_zgit_repo() -> Result<(), Box<dyn Error>> {
 }
 
 type Oid = [u8; 20];
-
+const BUFFER_SIZE: usize = 512;
 ///Return blob of hash. Hash generated using header byte + data buffer
 /// ```
 /// use std::io::Cursor;
 /// use zgit::compute_oid;
+/// use zgit::utlis::ObjType;
 ///let mut data = Cursor::new("hello");
-/// let oid = compute_oid("blob", &mut data).unwrap();
+/// let oid = compute_oid(&ObjType::Blob, &mut data).unwrap();
 /// assert_eq!(hex::encode(oid), "b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0")
 ///
 /// ```
@@ -87,14 +89,32 @@ pub fn compute_oid(tp: &ObjType, data: &mut (impl Read + Seek)) -> Result<Oid, B
         ObjType::Blob => header.push_str("blob"),
         ObjType::Tag => header.push_str("tag"),
     };
-    let mut buffer = Vec::new();
-    let size = data.read_to_end(&mut buffer)?;
+    let mut collected_buffer: Vec<u8> = Vec::new();
+    let mut reader = BufReader::with_capacity(BUFFER_SIZE, &mut *data);
+    let mut size = 0;
+    loop {
+        let buffer = reader.fill_buf()?;
+
+        let buffer_length = buffer.len();
+
+        // BufRead could not read any bytes.
+        // The file must have completely been read.
+        if buffer_length == 0 {
+            break;
+        }
+        size += buffer_length;
+        collected_buffer.extend_from_slice(buffer);
+
+        // All bytes consumed from the buffer
+        // should not be read again.
+        reader.consume(buffer_length);
+    }
     data.rewind()?;
     header.push_str(format!(" {}\0", size).as_str());
     let mut hasher = Sha1::new();
 
     hasher.update(header.as_bytes());
-    hasher.update(buffer);
+    hasher.update(&collected_buffer);
     let result = hasher.finalize();
 
     Ok(result.into())
@@ -102,7 +122,7 @@ pub fn compute_oid(tp: &ObjType, data: &mut (impl Read + Seek)) -> Result<Oid, B
 
 pub fn format_object_content(
     tp: &ObjType,
-    mut data: impl Read + Seek,
+    data: &mut (impl Read + Seek),
 ) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut header = String::new();
 
@@ -112,13 +132,31 @@ pub fn format_object_content(
         ObjType::Blob => header.push_str("blob"),
         ObjType::Tag => header.push_str("tag"),
     };
-    let mut buffer = Vec::new();
-    let size = data.read_to_end(&mut buffer)?;
+    let mut collected_buffer: Vec<u8> = Vec::new();
+    let mut reader = BufReader::with_capacity(BUFFER_SIZE, &mut *data);
+    let mut size = 0;
+    loop {
+        let buffer = reader.fill_buf()?;
+
+        let buffer_length = buffer.len();
+
+        // BufRead could not read any bytes.
+        // The file must have completely been read.
+        if buffer_length == 0 {
+            break;
+        }
+        size += buffer_length;
+        collected_buffer.extend_from_slice(buffer);
+
+        // All bytes consumed from the buffer
+        // should not be read again.
+        reader.consume(buffer_length);
+    }
     data.rewind()?;
 
     header.push_str(format!(" {}\0", size).as_str());
     let mut concatened = header.as_bytes().to_vec();
-    concatened.extend(buffer);
+    concatened.extend(collected_buffer);
     Ok(concatened)
 }
 

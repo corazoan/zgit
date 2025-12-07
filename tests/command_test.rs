@@ -17,8 +17,8 @@ fn test_compute_oid() {
 
 #[test]
 fn test_format_object_content() {
-    let data = Cursor::new("hello");
-    let some = format_object_content(&ObjType::Blob, data).unwrap();
+    let mut data = Cursor::new("hello");
+    let some = format_object_content(&ObjType::Blob, &mut data).unwrap();
     assert_eq!(some, b"blob 5\0hello")
 }
 
