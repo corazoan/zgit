@@ -10,6 +10,7 @@ pub enum ObjType {
     Blob,
     Commit,
     Tag,
+    Tree,
 }
 pub fn get_absolute_path<P: AsRef<Path>>(path: P) -> io::Result<PathBuf> {
     let input_path = path.as_ref();
