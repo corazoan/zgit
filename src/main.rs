@@ -1,7 +1,5 @@
 use std::process;
-
 use zgit::init_zgit_repo;
-
 pub mod cli;
 
 fn main() {
@@ -12,7 +10,6 @@ fn main() {
                 println!("\x1b[31mError during initilializing git repository: {err} \x1b[00m")
             };
         }
-
         _ => {
             println!("\x1b[31mReceive unexpected arguments: \x1b[00m");
             process::exit(1)

@@ -1,15 +1,11 @@
-use std::fs::{File, create_dir_all, rename};
-use std::io::{self, BufRead, BufReader, ErrorKind, prelude::*};
+use std::fs::{File, rename};
+use std::io::{self, BufRead, BufReader};
 use std::{
     error::Error,
     fs::{self},
     io::Write,
     path::{Path, PathBuf},
 };
-
-// use std::{env, path};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 #[derive(Debug, PartialEq)]
 pub enum ObjType {
     Blob,
@@ -17,6 +13,7 @@ pub enum ObjType {
     Tag,
     Tree,
 }
+
 pub fn get_absolute_path<P: AsRef<Path>>(path: P) -> io::Result<PathBuf> {
     let input_path = path.as_ref();
 

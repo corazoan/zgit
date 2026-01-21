@@ -1,3 +1,9 @@
+use crate::dto::index::{Index, IndexEntry};
+use crate::utlis::{
+    ObjType, append_content_atomically, find_file_by_name, get_absolute_path, raw_buf_to_u16,
+    raw_buf_to_u32, write_content_atomically,
+};
+
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use sha1::{Digest, Sha1};
 use std::io::{BufRead, BufReader};
@@ -9,12 +15,7 @@ use std::{
     path::{Path, PathBuf},
     u8,
 };
-
-use crate::utlis::{
-    ObjType, append_content_atomically, find_file_by_name, get_absolute_path, raw_buf_to_u16,
-    raw_buf_to_u32, write_content_atomically,
-};
-
+pub mod dto;
 pub mod utlis;
 /// Locate the nearest Git repository by walking upward from `path`.
 ///
@@ -311,64 +312,6 @@ pub fn read_object(repo: &Path, oid_or_prefix: &str) -> Result<(ObjType, Vec<u8>
     return Err(format!("Object not found with given prefix {}", oid_or_prefix).into());
 }
 
-pub struct Index {
-    pub entries: Vec<IndexEntry>,
-}
-pub struct IndexEntry {
-    pub ctime_secs: u32,
-    pub ctime_nsec: u32,
-    pub mtime_secs: u32,
-    pub mtime_nsec: u32,
-    pub dev: u32,
-    pub ino: u32,
-    pub mode: u32,
-    pub uid: u32,
-    pub gid: u32,
-    pub file_size: u32,
-    pub oid: Oid,
-    pub flags: u16,
-    pub path: String,
-}
-
-impl IndexEntry {
-    pub fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        w.write_all(&self.ctime_secs.to_be_bytes())?;
-        w.write_all(&self.ctime_nsec.to_be_bytes())?;
-        w.write_all(&self.mtime_secs.to_be_bytes())?;
-        w.write_all(&self.mtime_nsec.to_be_bytes())?;
-        w.write_all(&self.dev.to_be_bytes())?;
-        w.write_all(&self.ino.to_be_bytes())?;
-        w.write_all(&self.mode.to_be_bytes())?;
-        w.write_all(&self.uid.to_be_bytes())?;
-        w.write_all(&self.gid.to_be_bytes())?;
-        w.write_all(&self.file_size.to_be_bytes())?;
-        w.write_all(&self.oid)?;
-        w.write_all(&self.flags.to_be_bytes())?;
-        w.write_all(&self.path.as_bytes())?;
-        w.write_all(&[0])?;
-        let entry_len = 62 + &self.path.as_bytes().len() + 1;
-        let pad_len = (8 - (entry_len % 8)) % 8;
-        let pad = vec![b'\0'; pad_len];
-        w.write_all(&pad)?;
-        Ok(())
-    }
-}
-
-impl Index {
-    pub fn write_to_file<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
-        let mut file = File::options().append(true).create(true).open(&path)?;
-        for entry in &self.entries {
-            entry.write(&mut file)?;
-        }
-        Ok(())
-    }
-
-    pub fn sort(&mut self) {
-        self.entries
-            .sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));
-    }
-}
-
 pub fn write_index<P: AsRef<Path>>(path: P, index: &mut Index) -> Result<(), Box<dyn Error>> {
     match find_repo(Some(path.as_ref().to_path_buf()), None)? {
         None => Err("Given Repo is not a git repo".into()),
@@ -644,7 +587,7 @@ pub fn read_index(path: &Path) -> Result<Index, Box<dyn Error>> {
                 start_index += j;
             }
             let mut path_buff = Vec::new();
-            while let Some(&buf) = &collect_buffer.get(start_index) {
+            while let Some(&buf) = collect_buffer.get(start_index) {
                 if buf != b'\0' {
                     path_buff.push(buf);
                 } else {
