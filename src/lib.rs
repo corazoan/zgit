@@ -287,17 +287,25 @@ pub fn read_object(repo: &Path, oid_or_prefix: &str) -> Result<(ObjType, Vec<u8>
             Some(file_path) => {
                 let compressed_data = File::open(file_path)?;
                 let mut d = ZlibDecoder::new(compressed_data);
-                let mut s = String::new();
-                d.read_to_string(&mut s)?;
+                let mut data = Vec::new();
+                d.read_to_end(&mut data)?;
 
-                let mut obj_type = s.split(" ");
-                let obj_type = obj_type.next();
-                let obj_type = match obj_type {
-                    None => return Err("Invalid hash object".into()),
-                    Some(tp) => tp,
+                let null_pos = data
+                    .iter()
+                    .position(|b| *b == 0)
+                    .ok_or("Invalid object: missing null bytes")?;
+
+                let header = &data[..null_pos];
+                let payload = data[null_pos + 1..].to_vec();
+                let header_str = std::str::from_utf8(header)?;
+                let mut parts = header_str.split(' ');
+                let obj_type_str = parts.next().ok_or("Invalid header")?;
+                let size: usize = parts.next().ok_or("Invalid header")?.parse()?;
+                if payload.len() != size {
+                    return Err("Object size mismatch".into());
                 };
 
-                let obj_type = match obj_type {
+                let obj_type = match obj_type_str {
                     "commit" => ObjType::Commit,
                     "blob" => ObjType::Blob,
                     "tag" => ObjType::Tag,
@@ -305,7 +313,7 @@ pub fn read_object(repo: &Path, oid_or_prefix: &str) -> Result<(ObjType, Vec<u8>
                     _ => return Err("Received invalid object type".into()),
                 };
 
-                return Ok((obj_type, s.as_bytes().into()));
+                return Ok((obj_type, payload));
             }
         }
     }
