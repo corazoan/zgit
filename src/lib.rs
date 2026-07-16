@@ -456,7 +456,7 @@ pub fn read_index(path: &Path) -> Result<Index, Box<dyn Error>> {
         }
 
         let entry_sequence_byte = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 20, 2];
-        for (i, _entry) in (0..num_entries).enumerate() {
+        for (_i, _entry) in (0..num_entries).enumerate() {
             let mut ctime_secs: u32 = 0;
             let mut ctime_nsec: u32 = 0;
             let mut mtime_secs: u32 = 0;
